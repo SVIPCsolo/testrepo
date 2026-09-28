@@ -1,6 +1,6 @@
 --[[
-    Roblox Fly & ESP Script
-    Features: Flight (WASD + Space/Shift), Player ESP (Box, Name, Health, Distance, Tracer)
+    Roblox Fly & ESP Script (Mobile + PC)
+    Features: Flight (Thumbstick/WASD + On-screen up/down buttons), Player ESP
     UI: Orion Library
 ]]
 
@@ -31,6 +31,7 @@ local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- ========== Variables ==========
 local Flying = false
@@ -46,6 +47,10 @@ local BoxColor = Color3.fromRGB(255, 255, 255)
 local NameColor = Color3.fromRGB(255, 255, 255)
 local TeamCheck = false
 local ESPData = {}
+
+-- Flight control states
+local FlyUp = false
+local FlyDown = false
 
 -- ========== UI Tabs ==========
 local FlightTab = Window:MakeTab({Name = "Flight", Icon = "rbxassetid://4483345998", PremiumOnly = false})
@@ -80,7 +85,7 @@ FlightSection:AddSlider({
     end
 })
 
-FlightSection:AddLabel("Controls: WASD | Space=Up | Shift=Down")
+FlightSection:AddLabel("移动: 摇杆/WASD | 上升/下降: 屏幕按钮 或 空格/Shift")
 
 -- ========== ESP UI ==========
 local ESPMainSection = ESPTab:AddSection({Name = "Main"})
@@ -187,6 +192,65 @@ SettingsSection:AddButton({
     end
 })
 
+-- ========== Mobile Flight Buttons ==========
+local FlyGui = Instance.new("ScreenGui")
+FlyGui.Name = "FlyControlGui"
+FlyGui.ResetOnSpawn = false
+FlyGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+FlyGui.Parent = PlayerGui
+
+local function CreateFlyButton(name, text, posX, posY)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Size = UDim2.new(0, 60, 0, 60)
+    btn.Position = UDim2.new(posX, 0, posY, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    btn.BackgroundTransparency = 0.3
+    btn.Text = text
+    btn.TextSize = 28
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.Visible = false
+    btn.AutoButtonColor = false
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = btn
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(100, 100, 100)
+    stroke.Thickness = 2
+    stroke.Parent = btn
+
+    btn.Parent = FlyGui
+    return btn
+end
+
+local UpButton = CreateFlyButton("UpButton", "▲", 0.82, 0.55)
+local DownButton = CreateFlyButton("DownButton", "▼", 0.82, 0.70)
+
+local function SetupButtonHold(btn, stateVar)
+    local pressing = false
+    btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            pressing = true
+            btn.BackgroundColor3 = Color3.fromRGB(60, 120, 255)
+        end
+    end)
+    btn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            pressing = false
+            btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        end
+    end)
+    -- expose state via a function
+    btn:GetPropertyChangedSignal("BackgroundColor3"):Connect(function() end)
+    return function() return pressing end
+end
+
+local GetUpState = SetupButtonHold(UpButton)
+local GetDownState = SetupButtonHold(DownButton)
+
 -- ========== Flight Logic ==========
 local FlightConnection
 local bodyGyro, bodyVelocity
@@ -211,6 +275,10 @@ function StartFlight()
     bodyVelocity.Velocity = Vector3.new(0, 0, 0)
     bodyVelocity.Parent = HRP
 
+    -- Show mobile flight buttons
+    UpButton.Visible = true
+    DownButton.Visible = true
+
     FlightConnection = RunService.RenderStepped:Connect(function()
         if not Flying or not HRP or not bodyVelocity or not bodyGyro then
             StopFlight()
@@ -222,22 +290,23 @@ function StartFlight()
 
         local MoveDirection = Vector3.new(0, 0, 0)
 
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-            MoveDirection = MoveDirection + CameraCFrame.LookVector
+        -- Horizontal movement: use Humanoid.MoveDirection (works for both PC WASD and mobile thumbstick)
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            local md = hum.MoveDirection
+            if md.Magnitude > 0.1 then
+                MoveDirection = md
+            end
         end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-            MoveDirection = MoveDirection - CameraCFrame.LookVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-            MoveDirection = MoveDirection - CameraCFrame.RightVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-            MoveDirection = MoveDirection + CameraCFrame.RightVector
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+
+        -- Up: Space (PC) or Up button (mobile)
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) or GetUpState() then
             MoveDirection = MoveDirection + Vector3.new(0, 1, 0)
         end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
+
+        -- Down: Shift (PC) or Down button (mobile)
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) or GetDownState() then
             MoveDirection = MoveDirection - Vector3.new(0, 1, 0)
         end
 
@@ -262,6 +331,8 @@ function StopFlight()
         bodyVelocity:Destroy()
         bodyVelocity = nil
     end
+    UpButton.Visible = false
+    DownButton.Visible = false
     local Character = LocalPlayer.Character
     if Character then
         local Humanoid = Character:FindFirstChildOfClass("Humanoid")
