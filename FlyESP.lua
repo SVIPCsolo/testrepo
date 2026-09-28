@@ -40,17 +40,9 @@ local ESPEnabled = false
 local ShowBoxes = true
 local ShowNames = true
 local ShowHealth = true
-local ShowDistance = true
 local ShowTracers = true
-local TracerOrigin = "Bottom"
-local BoxColor = Color3.fromRGB(255, 255, 255)
-local NameColor = Color3.fromRGB(255, 255, 255)
 local TeamCheck = false
 local ESPData = {}
-
--- Flight control states
-local FlyUp = false
-local FlyDown = false
 
 -- ========== UI Tabs ==========
 local FlightTab = Window:MakeTab({Name = "Flight", Icon = "rbxassetid://4483345998", PremiumOnly = false})
@@ -85,33 +77,28 @@ FlightSection:AddSlider({
     end
 })
 
-FlightSection:AddLabel("移动: 摇杆/WASD | 上升/下降: 屏幕按钮 或 空格/Shift")
+FlightSection:AddLabel("摇杆/WASD移动 | 屏幕按钮升降")
 
--- ========== ESP UI ==========
-local ESPMainSection = ESPTab:AddSection({Name = "Main"})
+-- ========== ESP UI (Simplified) ==========
+local ESPMainSection = ESPTab:AddSection({Name = "ESP"})
 
 ESPMainSection:AddToggle({
     Name = "Enable ESP",
     Default = false,
     Callback = function(Value)
         ESPEnabled = Value
-        if not ESPEnabled then
-            ClearESP()
-        end
     end
 })
 
 ESPMainSection:AddToggle({
-    Name = "Team Check",
+    Name = "Team Check (hide teammates)",
     Default = false,
     Callback = function(Value)
         TeamCheck = Value
     end
 })
 
-local ESPVisualSection = ESPTab:AddSection({Name = "Visuals"})
-
-ESPVisualSection:AddToggle({
+ESPMainSection:AddToggle({
     Name = "Boxes",
     Default = true,
     Callback = function(Value)
@@ -119,7 +106,7 @@ ESPVisualSection:AddToggle({
     end
 })
 
-ESPVisualSection:AddToggle({
+ESPMainSection:AddToggle({
     Name = "Names",
     Default = true,
     Callback = function(Value)
@@ -127,7 +114,7 @@ ESPVisualSection:AddToggle({
     end
 })
 
-ESPVisualSection:AddToggle({
+ESPMainSection:AddToggle({
     Name = "Health Bar",
     Default = true,
     Callback = function(Value)
@@ -135,15 +122,7 @@ ESPVisualSection:AddToggle({
     end
 })
 
-ESPVisualSection:AddToggle({
-    Name = "Distance",
-    Default = true,
-    Callback = function(Value)
-        ShowDistance = Value
-    end
-})
-
-ESPVisualSection:AddToggle({
+ESPMainSection:AddToggle({
     Name = "Tracers",
     Default = true,
     Callback = function(Value)
@@ -151,32 +130,7 @@ ESPVisualSection:AddToggle({
     end
 })
 
-ESPVisualSection:AddDropdown({
-    Name = "Tracer Origin",
-    Default = "Bottom",
-    Options = {"Top", "Bottom", "Center"},
-    Callback = function(Value)
-        TracerOrigin = Value
-    end
-})
-
-local ESPColorSection = ESPTab:AddSection({Name = "Colors"})
-
-ESPColorSection:AddColorpicker({
-    Name = "Box Color",
-    Default = Color3.fromRGB(255, 255, 255),
-    Callback = function(Value)
-        BoxColor = Value
-    end
-})
-
-ESPColorSection:AddColorpicker({
-    Name = "Name Color",
-    Default = Color3.fromRGB(255, 255, 255),
-    Callback = function(Value)
-        NameColor = Value
-    end
-})
+ESPMainSection:AddLabel("Tap here and swipe up/down to scroll")
 
 -- ========== Settings UI ==========
 local SettingsSection = SettingsTab:AddSection({Name = "Configuration"})
@@ -229,7 +183,7 @@ end
 local UpButton = CreateFlyButton("UpButton", "▲", 0.82, 0.55)
 local DownButton = CreateFlyButton("DownButton", "▼", 0.82, 0.70)
 
-local function SetupButtonHold(btn, stateVar)
+local function SetupButtonHold(btn)
     local pressing = false
     btn.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -243,8 +197,6 @@ local function SetupButtonHold(btn, stateVar)
             btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
         end
     end)
-    -- expose state via a function
-    btn:GetPropertyChangedSignal("BackgroundColor3"):Connect(function() end)
     return function() return pressing end
 end
 
@@ -275,7 +227,6 @@ function StartFlight()
     bodyVelocity.Velocity = Vector3.new(0, 0, 0)
     bodyVelocity.Parent = HRP
 
-    -- Show mobile flight buttons
     UpButton.Visible = true
     DownButton.Visible = true
 
@@ -290,7 +241,6 @@ function StartFlight()
 
         local MoveDirection = Vector3.new(0, 0, 0)
 
-        -- Horizontal movement: use Humanoid.MoveDirection (works for both PC WASD and mobile thumbstick)
         local char = LocalPlayer.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if hum then
@@ -300,12 +250,10 @@ function StartFlight()
             end
         end
 
-        -- Up: Space (PC) or Up button (mobile)
         if UserInputService:IsKeyDown(Enum.KeyCode.Space) or GetUpState() then
             MoveDirection = MoveDirection + Vector3.new(0, 1, 0)
         end
 
-        -- Down: Shift (PC) or Down button (mobile)
         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) or GetDownState() then
             MoveDirection = MoveDirection - Vector3.new(0, 1, 0)
         end
@@ -349,16 +297,26 @@ LocalPlayer.CharacterAdded:Connect(function()
     end
 end)
 
--- ========== ESP Logic ==========
+-- ========== ESP Logic (with pcall protection) ==========
+local DrawingAvailable = pcall(function() return Drawing.new("Square") end)
+if DrawingAvailable then
+    -- cleanup test object
+    local test = Drawing.new("Square")
+    test:Remove()
+end
+
 function CreateESP(Player)
-    local Data = {
-        Box = Drawing.new("Square"),
-        Name = Drawing.new("Text"),
-        HealthBar = Drawing.new("Square"),
-        HealthBarBG = Drawing.new("Square"),
-        Distance = Drawing.new("Text"),
-        Tracer = Drawing.new("Line")
-    }
+    if not DrawingAvailable then return end
+    local ok, Data = pcall(function()
+        return {
+            Box = Drawing.new("Square"),
+            Name = Drawing.new("Text"),
+            HealthBar = Drawing.new("Square"),
+            HealthBarBG = Drawing.new("Square"),
+            Tracer = Drawing.new("Line")
+        }
+    end)
+    if not ok then return end
 
     Data.Box.Visible = false
     Data.Box.Thickness = 1
@@ -379,12 +337,6 @@ function CreateESP(Player)
     Data.HealthBarBG.Filled = true
     Data.HealthBarBG.Color = Color3.fromRGB(0, 0, 0)
 
-    Data.Distance.Visible = false
-    Data.Distance.Size = 12
-    Data.Distance.Center = true
-    Data.Distance.Outline = true
-    Data.Distance.Font = 2
-
     Data.Tracer.Visible = false
     Data.Tracer.Thickness = 1
 
@@ -394,9 +346,11 @@ end
 function RemoveESP(Player)
     local Data = ESPData[Player]
     if Data then
-        for _, DrawingObj in pairs(Data) do
-            DrawingObj:Remove()
-        end
+        pcall(function()
+            for _, DrawingObj in pairs(Data) do
+                DrawingObj:Remove()
+            end
+        end)
         ESPData[Player] = nil
     end
 end
@@ -407,9 +361,11 @@ function ClearESP()
     end
 end
 
-for _, Player in ipairs(Players:GetPlayers()) do
-    if Player ~= LocalPlayer then
-        CreateESP(Player)
+if DrawingAvailable then
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= LocalPlayer then
+            CreateESP(Player)
+        end
     end
 end
 
@@ -421,22 +377,16 @@ Players.PlayerRemoving:Connect(function(Player)
     RemoveESP(Player)
 end)
 
-function GetTeamColor(Player)
-    if Player.Team then
-        return Player.Team.TeamColor.Color
-    end
-    return Color3.fromRGB(255, 255, 255)
-end
-
 RunService.RenderStepped:Connect(function()
-    if not ESPEnabled then
+    if not ESPEnabled or not DrawingAvailable then
         for _, Data in pairs(ESPData) do
-            Data.Box.Visible = false
-            Data.Name.Visible = false
-            Data.HealthBar.Visible = false
-            Data.HealthBarBG.Visible = false
-            Data.Distance.Visible = false
-            Data.Tracer.Visible = false
+            pcall(function()
+                Data.Box.Visible = false
+                Data.Name.Visible = false
+                Data.HealthBar.Visible = false
+                Data.HealthBarBG.Visible = false
+                Data.Tracer.Visible = false
+            end)
         end
         return
     end
@@ -446,12 +396,13 @@ RunService.RenderStepped:Connect(function()
     for Player, Data in pairs(ESPData) do
         local Character = Player.Character
         if not Character then
-            Data.Box.Visible = false
-            Data.Name.Visible = false
-            Data.HealthBar.Visible = false
-            Data.HealthBarBG.Visible = false
-            Data.Distance.Visible = false
-            Data.Tracer.Visible = false
+            pcall(function()
+                Data.Box.Visible = false
+                Data.Name.Visible = false
+                Data.HealthBar.Visible = false
+                Data.HealthBarBG.Visible = false
+                Data.Tracer.Visible = false
+            end)
             continue
         end
 
@@ -460,33 +411,36 @@ RunService.RenderStepped:Connect(function()
         local Head = Character:FindFirstChild("Head")
 
         if not Humanoid or not HRP or not Head then
-            Data.Box.Visible = false
-            Data.Name.Visible = false
-            Data.HealthBar.Visible = false
-            Data.HealthBarBG.Visible = false
-            Data.Distance.Visible = false
-            Data.Tracer.Visible = false
+            pcall(function()
+                Data.Box.Visible = false
+                Data.Name.Visible = false
+                Data.HealthBar.Visible = false
+                Data.HealthBarBG.Visible = false
+                Data.Tracer.Visible = false
+            end)
             continue
         end
 
-        if TeamCheck and Player.Team == LocalPlayer.Team then
-            Data.Box.Visible = false
-            Data.Name.Visible = false
-            Data.HealthBar.Visible = false
-            Data.HealthBarBG.Visible = false
-            Data.Distance.Visible = false
-            Data.Tracer.Visible = false
+        if TeamCheck and Player.Team and LocalPlayer.Team and Player.Team == LocalPlayer.Team then
+            pcall(function()
+                Data.Box.Visible = false
+                Data.Name.Visible = false
+                Data.HealthBar.Visible = false
+                Data.HealthBarBG.Visible = false
+                Data.Tracer.Visible = false
+            end)
             continue
         end
 
         local HRPPos, OnScreen = Camera:WorldToViewportPoint(HRP.Position)
         if not OnScreen then
-            Data.Box.Visible = false
-            Data.Name.Visible = false
-            Data.HealthBar.Visible = false
-            Data.HealthBarBG.Visible = false
-            Data.Distance.Visible = false
-            Data.Tracer.Visible = false
+            pcall(function()
+                Data.Box.Visible = false
+                Data.Name.Visible = false
+                Data.HealthBar.Visible = false
+                Data.HealthBarBG.Visible = false
+                Data.Tracer.Visible = false
+            end)
             continue
         end
 
@@ -499,84 +453,59 @@ RunService.RenderStepped:Connect(function()
         local BoxX = HRPPos.X - BoxWidth / 2
         local BoxY = HeadPos.Y
 
-        local TeamColor = GetTeamColor(Player)
-
-        -- Box
-        if ShowBoxes then
-            Data.Box.Visible = true
-            Data.Box.Color = BoxColor
-            Data.Box.Size = Vector2.new(BoxWidth, BoxHeight)
-            Data.Box.Position = Vector2.new(BoxX, BoxY)
-        else
-            Data.Box.Visible = false
-        end
-
-        -- Name
-        if ShowNames then
-            Data.Name.Visible = true
-            Data.Name.Text = Player.Name
-            Data.Name.Color = NameColor
-            Data.Name.Position = Vector2.new(HRPPos.X, BoxY - 16)
-        else
-            Data.Name.Visible = false
-        end
-
-        -- Health
-        if ShowHealth then
-            local Health = Humanoid.Health
-            local MaxHealth = Humanoid.MaxHealth
-            local HealthPercent = math.clamp(Health / MaxHealth, 0, 1)
-
-            Data.HealthBarBG.Visible = true
-            Data.HealthBarBG.Size = Vector2.new(2, BoxHeight)
-            Data.HealthBarBG.Position = Vector2.new(BoxX - 4, BoxY)
-
-            Data.HealthBar.Visible = true
-            Data.HealthBar.Size = Vector2.new(2, BoxHeight * HealthPercent)
-            Data.HealthBar.Position = Vector2.new(BoxX - 4, BoxY + BoxHeight * (1 - HealthPercent))
-
-            if HealthPercent > 0.5 then
-                Data.HealthBar.Color = Color3.fromRGB(0, 255, 0)
-            elseif HealthPercent > 0.25 then
-                Data.HealthBar.Color = Color3.fromRGB(255, 255, 0)
+        pcall(function()
+            if ShowBoxes then
+                Data.Box.Visible = true
+                Data.Box.Color = Color3.fromRGB(255, 255, 255)
+                Data.Box.Size = Vector2.new(BoxWidth, BoxHeight)
+                Data.Box.Position = Vector2.new(BoxX, BoxY)
             else
-                Data.HealthBar.Color = Color3.fromRGB(255, 0, 0)
-            end
-        else
-            Data.HealthBar.Visible = false
-            Data.HealthBarBG.Visible = false
-        end
-
-        -- Distance
-        if ShowDistance then
-            local Dist = (CameraPos - HRP.Position).Magnitude
-            Data.Distance.Visible = true
-            Data.Distance.Text = string.format("%d studs", math.floor(Dist))
-            Data.Distance.Color = Color3.fromRGB(200, 200, 200)
-            Data.Distance.Position = Vector2.new(HRPPos.X, BoxY + BoxHeight + 2)
-        else
-            Data.Distance.Visible = false
-        end
-
-        -- Tracer
-        if ShowTracers then
-            Data.Tracer.Visible = true
-            Data.Tracer.Color = BoxColor
-
-            local Origin
-            if TracerOrigin == "Top" then
-                Origin = Vector2.new(Camera.ViewportSize.X / 2, 0)
-            elseif TracerOrigin == "Bottom" then
-                Origin = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-            else
-                Origin = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                Data.Box.Visible = false
             end
 
-            Data.Tracer.From = Origin
-            Data.Tracer.To = Vector2.new(HRPPos.X, HRPPos.Y)
-        else
-            Data.Tracer.Visible = false
-        end
+            if ShowNames then
+                Data.Name.Visible = true
+                Data.Name.Text = Player.Name
+                Data.Name.Color = Color3.fromRGB(255, 255, 255)
+                Data.Name.Position = Vector2.new(HRPPos.X, BoxY - 16)
+            else
+                Data.Name.Visible = false
+            end
+
+            if ShowHealth then
+                local Health = Humanoid.Health
+                local MaxHealth = Humanoid.MaxHealth
+                local HealthPercent = math.clamp(Health / MaxHealth, 0, 1)
+
+                Data.HealthBarBG.Visible = true
+                Data.HealthBarBG.Size = Vector2.new(2, BoxHeight)
+                Data.HealthBarBG.Position = Vector2.new(BoxX - 4, BoxY)
+
+                Data.HealthBar.Visible = true
+                Data.HealthBar.Size = Vector2.new(2, BoxHeight * HealthPercent)
+                Data.HealthBar.Position = Vector2.new(BoxX - 4, BoxY + BoxHeight * (1 - HealthPercent))
+
+                if HealthPercent > 0.5 then
+                    Data.HealthBar.Color = Color3.fromRGB(0, 255, 0)
+                elseif HealthPercent > 0.25 then
+                    Data.HealthBar.Color = Color3.fromRGB(255, 255, 0)
+                else
+                    Data.HealthBar.Color = Color3.fromRGB(255, 0, 0)
+                end
+            else
+                Data.HealthBar.Visible = false
+                Data.HealthBarBG.Visible = false
+            end
+
+            if ShowTracers then
+                Data.Tracer.Visible = true
+                Data.Tracer.Color = Color3.fromRGB(255, 255, 255)
+                Data.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                Data.Tracer.To = Vector2.new(HRPPos.X, HRPPos.Y)
+            else
+                Data.Tracer.Visible = false
+            end
+        end)
     end
 end)
 
