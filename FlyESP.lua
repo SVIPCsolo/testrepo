@@ -4,7 +4,25 @@
     UI: Orion Library
 ]]
 
-local OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/shlexware/Orion/main/source"))()
+local OrionUrls = {
+    "https://raw.githubusercontent.com/jensonhirst/Orion/main/source",
+    "https://raw.githubusercontent.com/shlexware/Orion/main/source"
+}
+
+local OrionLib
+for _, url in ipairs(OrionUrls) do
+    local ok, lib = pcall(function()
+        return loadstring(game:HttpGet(url))()
+    end)
+    if ok and lib then
+        OrionLib = lib
+        break
+    end
+end
+
+if not OrionLib then
+    error("Failed to load Orion Library from all sources")
+end
 local Window = OrionLib:MakeWindow({Name = "Fly & ESP Hub", HidePremium = false, SaveConfig = true, ConfigFolder = "FlyESPHub"})
 
 local Players = game:GetService("Players")
