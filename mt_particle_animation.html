@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MT 多线程高级粒子动画 · Multi-Threaded Particle System</title>
+<style>
+  :root {
+    --bg-0: #05060f;
+    --bg-1: #0a0e24;
+    --panel-bg: rgba(14, 18, 40, 0.72);
+    --panel-border: rgba(120, 160, 255, 0.25);
+    --accent: #6ea8ff;
+    --accent-2: #b07cff;
+    --text: #e8ecff;
+    --text-dim: #8a93c4;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: radial-gradient(ellipse at 30% 20%, var(--bg-1) 0%, var(--bg-0) 70%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", Roboto, sans-serif;
+    user-select: none;
+  }
+
+  #stage {
+    position: fixed; inset: 0;
+    display: block;
+    cursor: crosshair;
+  }
+
+  /* ---- 控制面板 ---- */
+  #panel {
+    position: fixed;
+    top: 16px; left: 16px;
+    width: 280px;
+    padding: 16px 18px 14px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    z-index: 10;
+    transition: transform .35s ease, opacity .35s ease;
+  }
+
+  #panel.collapsed { transform: translateX(-110%); opacity: 0; }
+
+  #panel h1 {
+    font-size: 15px; font-weight: 600;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 2px;
+    letter-spacing: .5px;
+  }
+
+  #panel .sub {
+    font-size: 11px; color: var(--text-dim);
+    margin-bottom: 14px;
+  }
+
+  .row { margin-bottom: 12px; }
+
+  .row label {
+    display: flex; justify-content: space-between;
+    font-size: 12px; color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+
+  .row label b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 4px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 4px; outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(110,168,255,0.7);
+    border: none;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px; border: none; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    cursor: pointer;
+  }
+
+  .toggles { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .toggle {
+    flex: 1 1 45%;
+    font-size: 11px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all .2s;
+    text-align: center;
+  }
+  .toggle:hover { color: var(--text); border-color: var(--accent); }
+  .toggle.on {
+    color: #fff;
+    background: linear-gradient(135deg, rgba(110,168,255,0.35), rgba(176,124,255,0.35));
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(110,168,255,0.3);
+  }
+
+  .btn-row { display: flex; gap: 8px; margin-top: 14px; }
+
+  .btn {
+    flex: 1;
+    font-size: 12px; padding: 8px;
+    border-radius: 8px; border: 1px solid var(--panel-border);
+    background: rgba(255,255,255,0.05);
+    color: var(--text); cursor: pointer;
+    transition: all .2s;
+  }
+  .btn:hover { background: rgba(110,168,255,0.2); border-color: var(--accent); }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border: none; color: #fff; font-weight: 600;
+  }
+  .btn.primary:hover { filter: brightness(1.12); }
+
+  /* ---- 状态栏 ---- */
+  #status {
+    position: fixed;
+    bottom: 16px; left: 16px;
+    display: flex; gap: 18px;
+    padding: 10px 16px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    font-size: 12px;
+    z-index: 10;
+  }
+
+  #status .item { display: flex; flex-direction: column; gap: 2px; }
+  #status .item span:first-child { color: var(--text-dim); font-size: 10px; }
+  #status .item span:last-child {
+    color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums;
+  }
+  #status .fps-good { color: #6effa0; }
+  #status .fps-mid  { color: #ffd166; }
+  #status .fps-bad  { color: #ff6b8a; }
+
+  /* ---- 折叠按钮 ---- */
+  #toggle-panel {
+    position: fixed; top: 16px; left: 16px;
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    background: var(--panel-bg);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    cursor: pointer; z-index: 11;
+    display: none;
+    align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  #toggle-panel.show { display: flex; }
+
+  .hint {
+    position: fixed;
+    bottom: 16px; right: 16px;
+    font-size: 11px; color: var(--text-dim);
+    background: var(--panel-bg);
+    padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(14px);
+  }
+
+  @media (max-width: 520px) {
+    #panel { width: calc(100% - 32px); }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+
+<button id="toggle-panel" title="显示控制面板">☰</button>
+
+<div id="panel">
+  <h1>⚡ MT 多线程粒子系统</h1>
+  <div class="sub">Web Workers 并行计算 · Canvas 实时渲染</div>
+
+  <div class="row">
+    <label>粒子数量 <b id="v-particles">900</b></label>
+    <input id="s-particles" type="range" min="100" max="4000" step="100" value="900">
+  </div>
+
+  <div class="row">
+    <label>工作线程数 <b id="v-workers">4</b></label>
+    <input id="s-workers" type="range" min="1" max="16" step="1" value="4">
+  </div>
+
+  <div class="row">
+    <label>鼠标引力 <b id="v-gravity">0.00</b></label>
+    <input id="s-gravity" type="range" min="-2" max="2" step="0.05" value="0">
+  </div>
+
+  <div class="row">
+    <label>运动速度 <b id="v-speed">1.00</b></label>
+    <input id="s-speed" type="range" min="0.1" max="3" step="0.1" value="1">
+  </div>
+
+  <div class="row">
+    <label>拖尾强度 <b id="v-trail">0.12</b></label>
+    <input id="s-trail" type="range" min="0.02" max="0.6" step="0.02" value="0.12">
+  </div>
+
+  <div class="row">
+    <label style="margin-bottom:6px;">显示选项</label>
+    <div class="toggles">
+      <div class="toggle on" data-key="links">连接线</div>
+      <div class="toggle on" data-key="glow">发光</div>
+      <div class="toggle on" data-key="color">彩色</div>
+      <div class="toggle" data-key="vortex">漩涡</div>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn" id="btn-reset">重置分布</button>
+    <button class="btn primary" id="btn-burst">粒子爆发</button>
+  </div>
+</div>
+
+<div id="status">
+  <div class="item"><span>FPS</span><span id="fps" class="fps-good">--</span></div>
+  <div class="item"><span>粒子</span><span id="stat-particles">0</span></div>
+  <div class="item"><span>线程</span><span id="stat-workers">0</span></div>
+  <div class="item"><span>帧耗时</span><span id="stat-frame">-- ms</span></div>
+</div>
+
+<div class="hint">移动鼠标产生引力 · 点击爆发粒子</div>
+
+<script>
+/* ============================================================
+ *  MT 多线程高级粒子动画
+ *  架构:
+ *    主线程  -> Canvas 渲染 + UI + 分发任务
+ *    Workers -> 并行更新各自负责的粒子物理状态
+ *  数据通过 SharedArrayBuffer / 回传 ArrayBuffer 高效交换
+ * ============================================================ */
+
+/* ---------- Worker 源码（内联，通过 Blob URL 加载） ---------- */
+const WORKER_SOURCE = `
+'use strict';
+// 每个 Worker 负责 [start, end) 区间的粒子
+let start = 0, count = 0, stride = 0;
+let buf = null;       // Float32Array 底层 buffer
+let view = null;      // 粒子数据视图
+let mouseX = 0, mouseY = 0, mouseActive = false;
+let gravity = 0, speedMul = 1.0, vortex = false;
+let W = 0, H = 0;
+
+self.onmessage = (e) => {
+  const t = e.data.type;
+  if (t === 'init') {
+    // init 只接收参数，不持有 buffer（buffer 在每帧 step 时 transfer 进来）
+    start   = e.data.start;
+    count   = e.data.count;
+    stride  = e.data.stride;
+    W = e.data.W; H = e.data.H;
+    self.postMessage({ type: 'ready' });
+  }
+  else if (t === 'config') {
+    gravity = e.data.gravity;
+    speedMul = e.data.speedMul;
+    vortex = e.data.vortex;
+    W = e.data.W; H = e.data.H;
+  }
+  else if (t === 'mouse') {
+    mouseX = e.data.x; mouseY = e.data.y; mouseActive = e.data.active;
+  }
+  else if (t === 'step') {
+    // 每帧接收主线程 transfer 过来的 buffer，处理完再 transfer 回去
+    buf  = e.data.buffer;
+    view = new Float32Array(buf);
+    // 粒子爆发（在主线程点击时触发）
+    if (e.data.burst) {
+      const cx = e.data.burst.x, cy = e.data.burst.y;
+      for (let i = 0; i < count; i++) {
+        const idx = (start + i) * stride;
+        const dx = view[idx] - cx, dy = view[idx+1] - cy;
+        const d = Math.hypot(dx, dy) + 0.0001;
+        const force = 14;
+        view[idx+2] += (dx / d) * force * (0.5 + Math.random());
+        view[idx+3] += (dy / d) * force * (0.5 + Math.random());
+      }
+    }
+    step();
+    self.postMessage({ type: 'done', buffer: buf }, [buf]);
+  }
+};
+
+function step() {
+  const end = start + count;
+  const g = gravity, sMul = speedMul;
+  const vx = vortex;
+  for (let i = start; i < end; i++) {
+    const idx = i * stride;
+    let px = view[idx], py = view[idx+1];
+    let vx_ = view[idx+2], vy_ = view[idx+3];
+
+    // 鼠标引力 / 斥力
+    if (mouseActive) {
+      let dx = mouseX - px, dy = mouseY - py;
+      const d2 = dx*dx + dy*dy;
+      const d = Math.sqrt(d2) + 0.0001;
+      if (d < 260) {
+        const f = g * 6000 / (d2 + 50);
+        vx_ += (dx / d) * f;
+        vy_ += (dy / d) * f;
+        // 漩涡：切向力
+        if (vx) {
+          vx_ += (-dy / d) * Math.abs(f) * 0.8;
+          vy_ += ( dx / d) * Math.abs(f) * 0.8;
+        }
+      }
+    }
+
+    // 轻微中心回拉（防止粒子飞散）
+    const cx = W/2, cy = H/2;
+    vx_ += (cx - px) * 0.00006;
+    vy_ += (cy - py) * 0.00006;
+
+    // 速度阻尼
+    vx_ *= 0.985;
+    vy_ *= 0.985;
+
+    // 限速
+    const sp = Math.hypot(vx_, vy_);
+    const maxSp = 12;
+    if (sp > maxSp) { vx_ = vx_/sp*maxSp; vy_ = vy_/sp*maxSp; }
+
+    px += vx_ * sMul;
+    py += vy_ * sMul;
+
+    // 边界反弹
+    if (px < 0)   { px = 0;   vx_ *= -0.7; }
+    if (px > W)   { px = W;   vx_ *= -0.7; }
+    if (py < 0)   { py = 0;   vy_ *= -0.7; }
+    if (py > H)   { py = H;   vy_ *= -0.7; }
+
+    view[idx]   = px;
+    view[idx+1] = py;
+    view[idx+2] = vx_;
+    view[idx+3] = vy_;
+
+    // 色相随速度变化（让颜色有生命力）
+    const speed = Math.hypot(vx_, vy_);
+    view[idx+4] = (view[idx+4] + speed * 0.15) % 360;
+  }
+}
+`;
+
+/* ---------- 主线程控制 ---------- */
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+const STRIDE = 7; // x, y, vx, vy, hue, size, reserved
+let W = 0, H = 0, DPR = 1;
+
+let particles = [];      // 粒子对象池（仅用于初始化/重分布）
+let particleBuffer = null; // Float32Array 共享数据
+let particleCount = 900;
+
+let workers = [];
+let workerCount = 4;
+let workerURL = null;
+
+let pendingSteps = 0;    // 等待完成的 worker 数
+let running = false;
+
+// 配置
+const config = {
+  gravity: 0,
+  speedMul: 1.0,
+  trail: 0.12,
+  showLinks: true,
+  showGlow: true,
+  showColor: true,
+  vortex: false,
+};
+
+let mouse = { x: -9999, y: -9999, active: false };
+let pendingBurst = null; // { x, y } 在下一帧 step 时应用
+
+/* ---------- 画布尺寸 ---------- */
+function resize() {
+  DPR = 1; // 强制 1x，大幅减少像素填充量（粒子动画不需要高 DPR）
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width  = Math.floor(W * DPR);
+  canvas.height = Math.floor(H * DPR);
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  broadcastConfig();
+}
+window.addEventListener('resize', resize);
+
+/* ---------- 初始化粒子 ---------- */
+function initParticles(n) {
+  particleCount = n;
+  particleBuffer = new Float32Array(n * STRIDE);
+  for (let i = 0; i < n; i++) {
+    const idx = i * STRIDE;
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * Math.min(W, H) * 0.4;
+    particleBuffer[idx]   = W/2 + Math.cos(angle) * r;   // x
+    particleBuffer[idx+1] = H/2 + Math.sin(angle) * r;   // y
+    particleBuffer[idx+2] = (Math.random() - 0.5) * 1.5; // vx
+    particleBuffer[idx+3] = (Math.random() - 0.5) * 1.5; // vy
+    particleBuffer[idx+4] = Math.random() * 360;         // hue
+    particleBuffer[idx+5] = 1.2 + Math.random() * 1.8;   // size
+    particleBuffer[idx+6] = 0;                            // reserved
+  }
+  document.getElementById('stat-particles').textContent = n;
+}
+
+/* ---------- 创建 / 重建 Worker 池 ---------- */
+function buildWorkers(n) {
+  // 清理旧 worker
+  workers.forEach(w => w.terminate());
+  workers = [];
+  workerCount = n;
+
+  if (!workerURL) {
+    const blob = new Blob([WORKER_SOURCE], { type: 'application/javascript' });
+    workerURL = URL.createObjectURL(blob);
+  }
+
+  // 把粒子均分给各 worker
+  const base = Math.floor(particleCount / n);
+  let rem = particleCount % n;
+  let cursor = 0;
+
+  for (let w = 0; w < n; w++) {
+    const c = base + (rem-- > 0 ? 1 : 0);
+    const worker = new Worker(workerURL);
+    worker._start = cursor;
+    worker._count = c;
+    worker._done = false;
+    worker.onmessage = onWorkerMessage;
+    // 初始化：传递该 worker 负责的 buffer 段（这里我们传整个 buffer，但 worker 只读写自己区间）
+    // 注意：transfer 会转移所有权，所以每个 worker 拿到的是同一块内存的不同视图引用？
+    // 实际上 ArrayBuffer transfer 后原线程无法访问。为了让多个 worker 共享，我们使用：
+    //   方案：每帧把 buffer 轮流交给 worker，worker 处理完再 transfer 回来。
+    // 但多 worker 并发需要分块。更稳妥：每个 worker 持有自己负责的子 buffer。
+    cursor += c;
+    workers.push(worker);
+  }
+
+  document.getElementById('stat-workers').textContent = n;
+}
+
+/* ---------- 重新设计：分块 buffer ----------
+ * 每个 worker 拥有自己的子 ArrayBuffer，处理完 transfer 回主线程，
+ * 主线程合并后渲染，再把对应子块重新分发给 worker。
+ * 这样避免 SharedArrayBuffer 的跨域限制。
+ */
+let particleChunks = []; // 每块: { buffer, view, start, count }
+
+function buildChunks() {
+  // 把粒子数据按 worker 数切成多块独立 buffer
+  particleChunks = [];
+  const base = Math.floor(particleCount / workerCount);
+  let rem = particleCount % workerCount;
+  let cursor = 0;
+  for (let w = 0; w < workerCount; w++) {
+    const c = base + (rem-- > 0 ? 1 : 0);
+    const buf = new ArrayBuffer(c * STRIDE * 4);
+    const view = new Float32Array(buf);
+    // 从主 buffer 拷贝数据
+    for (let i = 0; i < c; i++) {
+      for (let s = 0; s < STRIDE; s++) {
+        view[i * STRIDE + s] = particleBuffer[(cursor + i) * STRIDE + s];
+      }
+    }
+    particleChunks.push({ buffer: buf, view, start: cursor, count: c });
+    cursor += c;
+  }
+}
+
+/* ---------- Worker 消息处理 ---------- */
+let generation = 0; // 每次 rebuild 递增，用于忽略旧 worker 的延迟消息
+
+function onWorkerMessage(e) {
+  const w = e.target;
+  const data = e.data;
+  if (data.type === 'done') {
+    const wi = workers.indexOf(w);
+    if (wi === -1) return; // 该 worker 已被 rebuild 替换，忽略
+    const chunk = particleChunks[wi];
+    chunk.buffer = data.buffer;
+    chunk.view = new Float32Array(data.buffer);
+    w._done = true;
+    pendingSteps--;
+    if (pendingSteps <= 0) {
+      pendingSteps = 0;
+      render();
+      scheduleNext();
+    }
+  }
+}
+
+/* ---------- 分发一帧计算 ---------- */
+function dispatchFrame() {
+  pendingSteps = workers.length;
+  const burst = pendingBurst;
+  pendingBurst = null; // 消费掉
+  for (let i = 0; i < workers.length; i++) {
+    const w = workers[i];
+    const chunk = particleChunks[i];
+    w._done = false;
+    // 注意：buffer 必须同时出现在消息体和 transfer list 中，
+    // 否则接收端 e.data.buffer 为 undefined
+    w.postMessage({
+      type: 'step',
+      burst: burst,
+      buffer: chunk.buffer,
+    }, [chunk.buffer]);
+  }
+}
+
+/* ---------- 配置广播 ---------- */
+function broadcastConfig() {
+  workers.forEach(w => {
+    w.postMessage({
+      type: 'config',
+      gravity: config.gravity,
+      speedMul: config.speedMul,
+      vortex: config.vortex,
+      W, H,
+    });
+  });
+}
+
+function broadcastMouse() {
+  workers.forEach(w => {
+    w.postMessage({
+      type: 'mouse',
+      x: mouse.x, y: mouse.y, active: mouse.active,
+    });
+  });
+}
+
+/* ---------- 渲染（批处理优化版） ---------- */
+const HUE_GROUPS = 8;           // 色相分组数（越少越快）
+const HUE_STEP = 360 / HUE_GROUPS;
+
+function render() {
+  // 拖尾：半透明黑色覆盖
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = `rgba(5, 6, 15, ${config.trail})`;
+  ctx.fillRect(0, 0, W, H);
+
+  const showLinks = config.showLinks;
+  const showGlow  = config.showGlow;
+  const showColor = config.showColor;
+
+  // 一次性收集所有粒子数据
+  const total = particleCount;
+  const xs  = new Float32Array(total);
+  const ys  = new Float32Array(total);
+  const vxs = new Float32Array(total);
+  const vys = new Float32Array(total);
+  const hs  = new Float32Array(total);
+  const sz  = new Float32Array(total);
+  let gi = 0;
+  for (const chunk of particleChunks) {
+    const v = chunk.view;
+    const c = chunk.count;
+    for (let i = 0; i < c; i++) {
+      const idx = i * STRIDE;
+      xs[gi]  = v[idx];
+      ys[gi]  = v[idx+1];
+      vxs[gi] = v[idx+2];
+      vys[gi] = v[idx+3];
+      hs[gi]  = v[idx+4];
+      sz[gi]  = v[idx+5];
+      gi++;
+    }
+  }
+
+  // 预计算每个粒子的半径和色相组
+  const radii = new Float32Array(total);
+  const hg = new Uint8Array(total); // hue group
+  for (let i = 0; i < total; i++) {
+    const speed = Math.hypot(vxs[i], vys[i]);
+    radii[i] = sz[i] + speed * 0.15;
+    const h = showColor ? hs[i] : 210;
+    hg[i] = Math.min(HUE_GROUPS - 1, (h / HUE_STEP) | 0);
+  }
+
+  ctx.globalCompositeOperation = 'lighter';
+  const TWO_PI = 6.2831853;
+
+  // ---- 连接线：按色相分组批处理 ----
+  if (showLinks) {
+    const cell = 64;
+    const linkDist = 38;
+    const linkDist2 = linkDist * linkDist;
+    const cols = ((W / cell) | 0) + 1;
+    const grid = new Map();
+    for (let i = 0; i < total; i++) {
+      const cx = (xs[i] / cell) | 0;
+      const cy = (ys[i] / cell) | 0;
+      const key = cy * cols + cx;
+      let arr = grid.get(key);
+      if (!arr) { arr = []; grid.set(key, arr); }
+      arr.push(i);
+    }
+
+    // 按色相组收集线段
+    const linkPaths = new Array(HUE_GROUPS);
+    for (let g = 0; g < HUE_GROUPS; g++) linkPaths[g] = new Path2D();
+
+    grid.forEach((list) => {
+      for (let a = 0; a < list.length; a++) {
+        const ia = list[a];
+        const cxa = (xs[ia] / cell) | 0;
+        const cya = (ys[ia] / cell) | 0;
+        for (let ny = cya; ny <= cya + 1; ny++) {
+          for (let nx = cxa - 1; nx <= cxa + 1; nx++) {
+            const other = grid.get(ny * cols + nx);
+            if (!other) continue;
+            for (let b = 0; b < other.length; b++) {
+              const ib = other[b];
+              if (ia >= ib) continue;
+              const dx = xs[ia] - xs[ib];
+              const dy = ys[ia] - ys[ib];
+              const d2 = dx*dx + dy*dy;
+              if (d2 < linkDist2) {
+                const avgH = (hs[ia] + hs[ib]) * 0.5;
+                const g = Math.min(HUE_GROUPS - 1, (avgH / HUE_STEP) | 0);
+                linkPaths[g].moveTo(xs[ia], ys[ia]);
+                linkPaths[g].lineTo(xs[ib], ys[ib]);
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // 每组一次 stroke
+    ctx.lineWidth = 1;
+    for (let g = 0; g < HUE_GROUPS; g++) {
+      ctx.strokeStyle = `hsla(${g * HUE_STEP + HUE_STEP/2}, 90%, 65%, 0.4)`;
+      ctx.stroke(linkPaths[g]);
+    }
+  }
+
+  // ---- 粒子：按色相分组批处理 ----
+  const corePaths = new Array(HUE_GROUPS);
+  const glowPaths = new Array(HUE_GROUPS);
+  for (let g = 0; g < HUE_GROUPS; g++) {
+    corePaths[g] = new Path2D();
+    glowPaths[g] = new Path2D();
+  }
+  for (let i = 0; i < total; i++) {
+    const g = hg[i];
+    const r = radii[i];
+    corePaths[g].moveTo(xs[i] + r, ys[i]);
+    corePaths[g].arc(xs[i], ys[i], r, 0, TWO_PI);
+    if (showGlow) {
+      glowPaths[g].moveTo(xs[i] + r * 2.6, ys[i]);
+      glowPaths[g].arc(xs[i], ys[i], r * 2.6, 0, TWO_PI);
+    }
+  }
+  // 绘制光晕（低透明度）
+  if (showGlow) {
+    for (let g = 0; g < HUE_GROUPS; g++) {
+      ctx.fillStyle = `hsla(${g * HUE_STEP + HUE_STEP/2}, 95%, 60%, 0.12)`;
+      ctx.fill(glowPaths[g]);
+    }
+  }
+  // 绘制核心
+  for (let g = 0; g < HUE_GROUPS; g++) {
+    ctx.fillStyle = `hsla(${g * HUE_STEP + HUE_STEP/2}, 95%, 70%, 0.9)`;
+    ctx.fill(corePaths[g]);
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/* ---------- 主循环 ---------- */
+let lastFrameTime = performance.now();
+let fpsAccum = 0, fpsFrames = 0, fpsTimer = 0;
+
+function scheduleNext() {
+  requestAnimationFrame(loop);
+}
+
+function loop() {
+  const now = performance.now();
+  const dt = now - lastFrameTime;
+  lastFrameTime = now;
+
+  // FPS 统计
+  fpsAccum += dt; fpsFrames++;
+  if (fpsAccum >= 500) {
+    const fps = Math.round(1000 / (fpsAccum / fpsFrames));
+    const el = document.getElementById('fps');
+    el.textContent = fps;
+    el.className = fps >= 50 ? 'fps-good' : fps >= 30 ? 'fps-mid' : 'fps-bad';
+    document.getElementById('stat-frame').textContent = dt.toFixed(1) + ' ms';
+    fpsAccum = 0; fpsFrames = 0;
+  }
+
+  dispatchFrame(); // 触发下一帧的并行计算（完成后在回调里 render + schedule）
+}
+
+/* ---------- 鼠标 / 触摸 ---------- */
+function setMouse(x, y, active) {
+  mouse.x = x; mouse.y = y; mouse.active = active;
+  broadcastMouse();
+}
+canvas.addEventListener('mousemove', e => setMouse(e.clientX, e.clientY, true));
+canvas.addEventListener('mouseleave', () => { mouse.active = false; broadcastMouse(); });
+canvas.addEventListener('touchmove', e => {
+  const t = e.touches[0]; setMouse(t.clientX, t.clientY, true);
+}, { passive: true });
+canvas.addEventListener('touchend', () => { mouse.active = false; broadcastMouse(); });
+
+// 点击爆发
+canvas.addEventListener('click', e => burst(e.clientX, e.clientY));
+
+function burst(x, y) {
+  pendingBurst = { x, y };
+}
+
+/* ---------- UI 绑定 ---------- */
+const $ = id => document.getElementById(id);
+
+$('s-particles').addEventListener('input', e => {
+  const n = +e.target.value;
+  $('v-particles').textContent = n;
+  rebuild(n, workerCount);
+});
+
+$('s-workers').addEventListener('input', e => {
+  const n = +e.target.value;
+  $('v-workers').textContent = n;
+  rebuild(particleCount, n);
+});
+
+$('s-gravity').addEventListener('input', e => {
+  config.gravity = +e.target.value;
+  $('v-gravity').textContent = config.gravity.toFixed(2);
+  broadcastConfig();
+});
+
+$('s-speed').addEventListener('input', e => {
+  config.speedMul = +e.target.value;
+  $('v-speed').textContent = config.speedMul.toFixed(2);
+  broadcastConfig();
+});
+
+$('s-trail').addEventListener('input', e => {
+  config.trail = +e.target.value;
+  $('v-trail').textContent = config.trail.toFixed(2);
+});
+
+document.querySelectorAll('.toggle').forEach(t => {
+  t.addEventListener('click', () => {
+    t.classList.toggle('on');
+    const key = t.dataset.key;
+    const on = t.classList.contains('on');
+    if (key === 'links')  config.showLinks = on;
+    if (key === 'glow')   config.showGlow = on;
+    if (key === 'color')  config.showColor = on;
+    if (key === 'vortex') { config.vortex = on; broadcastConfig(); }
+  });
+});
+
+$('btn-reset').addEventListener('click', () => rebuild(particleCount, workerCount));
+$('btn-burst').addEventListener('click', () => burst(W/2, H/2));
+
+// 面板折叠
+$('toggle-panel').addEventListener('click', () => {
+  $('panel').classList.remove('collapsed');
+  $('toggle-panel').classList.remove('show');
+});
+// 双击空白折叠面板
+document.addEventListener('dblclick', e => {
+  if (e.target === canvas) {
+    $('panel').classList.add('collapsed');
+    $('toggle-panel').classList.add('show');
+  }
+});
+
+/* ---------- 重建系统 ---------- */
+function rebuild(n, wcount) {
+  initParticles(n);
+  buildWorkers(wcount);
+  buildChunks();
+  // 给每个 worker 初始化（只传参数，buffer 在每帧 step 时流转）
+  for (let i = 0; i < workers.length; i++) {
+    const w = workers[i];
+    const chunk = particleChunks[i];
+    w.postMessage({
+      type: 'init',
+      start: 0,            // worker 内索引从 0 开始（相对自己的 chunk）
+      count: chunk.count,
+      stride: STRIDE,
+      W, H,
+    });
+  }
+  broadcastConfig();
+}
+
+/* ---------- 启动 ---------- */
+function start() {
+  resize();
+  rebuild(particleCount, workerCount);
+  running = true;
+  scheduleNext();
+}
+start();
+</script>
+</body>
+</html>
